@@ -1,1 +1,4 @@
 yfinance>=0.2.60,<2
+
+requests>=2.31,<3
+feedparser>=6.0,<7
