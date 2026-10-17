@@ -54,7 +54,21 @@ queries=[
  ("US","Nasdaq technology stocks earnings AI chips when:3d"),
  ("India","RBI inflation rupee Nifty markets when:3d"),
  ("India","India economy companies earnings stock market when:3d")]
+# Official central-bank announcements take precedence over aggregated coverage.
 news=[];seen=set()
+official_feeds=[
+ ("US","Federal Reserve","https://www.federalreserve.gov/feeds/press_all.xml"),
+ ("India","RBI policy / circulars","https://www.rbi.org.in/scripts/rss.aspx?Id=1")]
+for region,sector,url in official_feeds:
+ try:
+  parsed=feedparser.parse(get(url).content)
+  for item in parsed.entries[:3]:
+   title=re.sub("<[^>]*>","",item.get("title","")).strip()
+   link=item.get("link","")
+   if title and link and title.lower() not in seen:
+    seen.add(title.lower())
+    news.append({"region":region,"sector":sector,"title":title,"url":link,"published":item.get("published",""),"source":"Official Federal Reserve" if region=="US" else "Official RBI","impactRemark":"Official regulatory or policy release; sector impact depends on the specific decision."})
+ except Exception as e:print("OFFICIAL FEED FAILED",region,str(e)[:120])
 for region,sector,q in queries:
  try:
   rss="https://news.google.com/rss/search?q="+quote(q)+"&hl=en-IN&gl=IN&ceid=IN:en"
@@ -67,7 +81,17 @@ for region,sector,q in queries:
    news.append({"region":region,"sector":sector,"title":title,"url":link,"published":item.get("published",""),"source":item.get("source",{}).get("title","Google News RSS"),"impactRemark":("Potential impact on Indian insurers and distribution; confirm regulatory details and affected companies." if sector=="Insurance / IRDAI" else "Potential impact on Indian pharma revenue, compliance or product pipeline; verify company-specific exposure." if sector=="Pharma" else "Potential market or sector impact; assess the original article before investing."),"type":"Aggregated headline; significance not independently verified"})
    break
  except Exception as e:print("NEWS FAILED",region,str(e)[:120])
-if not news:news=d.get("news",[])\n# Exactly three slots per region, prioritizing insurance and pharma among Indian items.\nnews=[x for region in ("US","India") for x in [y for y in news if y.get("region")==region][:3]]
+if not news:news=d.get("news",[])\n# Exactly three slots per region, prioritizing insurance and pharma among Indian items.\n# US: official Fed first, then market headlines. India: one market item, one IRDAI item, one pharma item where available.
+selected=[]
+for region in ("US","India"):
+ pool=[x for x in news if x.get("region")==region]
+ if region=="US":selected+=pool[:3]
+ else:
+  for sector in ("Insurance / IRDAI","Pharma"):
+   match=next((x for x in pool if x.get("sector")==sector),None)
+   if match:selected.append(match)
+  selected+= [x for x in pool if x not in selected][:max(0,3-len([x for x in selected if x.get("region")=="India"]))]
+news=selected[:6]
 d["macro"]=macro;d["news"]=news[:6]
 d["macroNewsAsOf"]=datetime.datetime.now(datetime.timezone.utc).isoformat()
 d["macroNewsNotes"]="US FRED official-source historical series and India World Bank annual indicators; India annual CPI/GDP are NOT the latest monthly CPI or quarterly GDP. Forecast consensus and upcoming release dates are not connected; missing estimates are explicitly labeled. US quarterly GDP growth is annualized; YoY changes are calculated from matching periods. News is aggregated Google News RSS; verify articles with original publishers."
