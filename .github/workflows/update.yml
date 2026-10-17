@@ -52,6 +52,9 @@ jobs:
       - name: Collect prices
         if: steps.slot.outputs.run == 'true'
         run: python fetch_data.py
+      - name: Collect macro and news (best effort)
+        if: steps.slot.outputs.run == 'true'
+        run: python macro_news.py
       - uses: actions/configure-pages@v5
         if: steps.slot.outputs.run == 'true'
       - uses: actions/upload-pages-artifact@v4
