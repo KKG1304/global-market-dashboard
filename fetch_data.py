@@ -23,10 +23,15 @@ for name,region,symbol,unit in symbols:
     if len(close)>=n:row["sma"+str(n)]=num(close.tail(n).mean())
    row["status"]="daily historical/delayed (not live)"
  except Exception as e:row["error"]=str(e)[:120]
+ if row["price"] is None:
+  prior=next((x for x in old.get("markets",[]) if x.get("symbol")==symbol and x.get("price") is not None),None)
+  if prior:
+   row=prior.copy()
+   row["status"]="STALE: last verified snapshot; automatic source unavailable"
  markets.append(row);time.sleep(.2)
 if not any(r["price"] is not None for r in markets) and old.get("markets"):
  markets=old["markets"];status="STALE: all new price requests failed"
-else:status="Daily historical/delayed quotes; 15-minute freshness NOT guaranteed"
+else:status="Daily historical/delayed quotes; unavailable symbols retain dated prior snapshots. 15-minute freshness NOT guaranteed"
 out={"asOf":datetime.datetime.now(datetime.timezone.utc).isoformat(),"dataStatus":status,"markets":markets,"macro":[],"news":[],"sourceNotes":"NSE and Nasdaq are reference sites, not scraped. Gold and silver here are USD futures, NOT MCX INR prices. Macro and news feeds are not yet connected.","lastSuccessfulMarketData":max((r["quoteTime"] for r in markets if r.get("quoteTime")),default=None)}
 (ROOT/"data.json").write_text(json.dumps(out,indent=2))
 print("Available",sum(r["price"] is not None for r in markets),"of",len(markets))
