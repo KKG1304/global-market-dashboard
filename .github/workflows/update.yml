@@ -1,5 +1,7 @@
 name: Market dashboard four daily updates
 on:
+  push:
+    branches: [main]
   schedule:
     - cron: '50 3 * * 1-5'
     - cron: '30 9 * * 1-5'
