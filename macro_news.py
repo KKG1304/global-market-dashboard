@@ -13,7 +13,7 @@ def fred(code):
  url=f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={code}"
  rows=list(csv.DictReader(io.StringIO(get(url).text)))
  valid=[(r["DATE"],float(r[code])) for r in rows if r.get(code) not in (None,"",".")]
- return valid[-2:] if valid else []
+ return valid[-16:] if valid else []
 macro=[]
 for region,name,code,unit,frequency,impact in [
  ("US","Consumer Price Index (CPI)","CPIAUCSL","Index, seasonally adjusted","Monthly","Inflation / Fed"),
@@ -33,7 +33,16 @@ for region,name,code,unit,frequency,impact in [
    obs=sorted([(x["date"],float(x["value"])) for x in obj[1] if x.get("value") is not None],key=lambda a:a[0])
    date,val=obs[-1];prev=obs[-2][1] if len(obs)>1 else None
    source="World Bank (annual historical indicator)";url=f"https://data.worldbank.org/indicator/{code}?locations=IN"
-  macro.append({"region":region,"event":name,"actual":round(val,3),"previous":round(prev,3) if prev is not None else None,"forecast":None,"period":date,"unit":unit,"frequency":frequency,"impact":impact,"source":source,"url":url})
+  # Actual includes verified YoY / QoQ only where comparable observations exist.
+  yearly=None;quarterly=None
+  if region=="US" and len(obs)>=5 and frequency=="Quarterly" and obs[-5][1]:
+   yearly=round(100*(val/obs[-5][1]-1),2)
+  if region=="US" and frequency=="Quarterly" and len(obs)>=2 and prev:
+   quarterly=round(100*((val/prev)**4-1),2) # annualized quarterly GDP growth
+  if region=="US" and frequency=="Monthly" and "Price Index" in name and len(obs)>=13 and obs[-13][1]:
+   yearly=round(100*(val/obs[-13][1]-1),2)
+  if region=="India" and frequency=="Annual":yearly=round(val,2)
+  macro.append({"region":region,"event":name,"date":date,"actual":round(val,3),"previous":round(prev,3) if prev is not None else None,"forecast":None,"estimateRemarks":"No verified consensus estimate available; compare the actual release with the prior period.","period":date,"unit":unit,"frequency":frequency,"impact":impact,"impactLevel":"High" if name in ("Real GDP","Consumer Price Index (CPI)","Unemployment rate","GDP growth (annual)") else "Medium","actualYoY":yearly,"actualQoQ":quarterly,"source":source,"url":url})
  except Exception as e:print("MACRO FAILED",name,str(e)[:120])
 # Keep previously verified values if a temporary endpoint fails.
 for x in d.get("macro",[]):
@@ -46,20 +55,21 @@ queries=[
  ("India","RBI inflation rupee Nifty markets when:3d"),
  ("India","India economy companies earnings stock market when:3d")]
 news=[];seen=set()
-for region,q in queries:
+for region,sector,q in queries:
  try:
   rss="https://news.google.com/rss/search?q="+quote(q)+"&hl=en-IN&gl=IN&ceid=IN:en"
   parsed=feedparser.parse(get(rss).content)
-  for item in parsed.entries[:6]:
+  for item in parsed.entries[:8]:
    title=re.sub("<[^>]*>","",item.get("title","")).strip()
    link=item.get("link","")
    if not title or not link or title.lower() in seen:continue
    seen.add(title.lower())
-   news.append({"region":region,"title":title,"url":link,"published":item.get("published",""),"source":item.get("source",{}).get("title","Google News RSS"),"type":"Aggregated headline; significance not independently verified"})
+   news.append({"region":region,"sector":sector,"title":title,"url":link,"published":item.get("published",""),"source":item.get("source",{}).get("title","Google News RSS"),"impactRemark":("Potential impact on Indian insurers and distribution; confirm regulatory details and affected companies." if sector=="Insurance / IRDAI" else "Potential impact on Indian pharma revenue, compliance or product pipeline; verify company-specific exposure." if sector=="Pharma" else "Potential market or sector impact; assess the original article before investing."),"type":"Aggregated headline; significance not independently verified"})
+   break
  except Exception as e:print("NEWS FAILED",region,str(e)[:120])
-if not news:news=d.get("news",[])
-d["macro"]=macro;d["news"]=news[:20]
+if not news:news=d.get("news",[])\n# Exactly three slots per region, prioritizing insurance and pharma among Indian items.\nnews=[x for region in ("US","India") for x in [y for y in news if y.get("region")==region][:3]]
+d["macro"]=macro;d["news"]=news[:6]
 d["macroNewsAsOf"]=datetime.datetime.now(datetime.timezone.utc).isoformat()
-d["macroNewsNotes"]="US FRED official-source historical series and India World Bank annual indicators; India annual CPI/GDP are NOT the latest monthly CPI or quarterly GDP. Forecasts and upcoming event calendar are not connected. News is aggregated Google News RSS; verify articles with original publishers."
+d["macroNewsNotes"]="US FRED official-source historical series and India World Bank annual indicators; India annual CPI/GDP are NOT the latest monthly CPI or quarterly GDP. Forecast consensus and upcoming release dates are not connected; missing estimates are explicitly labeled. US quarterly GDP growth is annualized; YoY changes are calculated from matching periods. News is aggregated Google News RSS; verify articles with original publishers."
 P.write_text(json.dumps(d,indent=2)+"\n")
 print("Macro records",len(macro),"News headlines",len(news))
