@@ -1,0 +1,61 @@
+name: Market dashboard four daily updates
+on:
+  schedule:
+    - cron: '50 3 * * 1-5'
+    - cron: '30 9 * * 1-5'
+    - cron: '35 13 * * 1-5'
+    - cron: '35 14 * * 1-5'
+    - cron: '30 19 * * 1-5'
+    - cron: '30 20 * * 1-5'
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: dashboard-pages
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select correct US DST slot
+        id: slot
+        env:
+          CRON: ${{ github.event.schedule }}
+        run: |
+          python - <<'PY'
+          import os,datetime
+          from zoneinfo import ZoneInfo
+          cron=os.environ.get('CRON','')
+          active=True
+          if cron.startswith(('35 13','35 14','30 19','30 20')):
+              now=datetime.datetime.now(ZoneInfo('America/New_York'))
+              dst=bool(now.dst())
+              active=cron.startswith(('35 13','30 19')) if dst else cron.startswith(('35 14','30 20'))
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:f.write('run='+str(active).lower()+'\n')
+          print('Scheduled slot:',cron,'execute:',active)
+          PY
+      - uses: actions/setup-python@v5
+        if: steps.slot.outputs.run == 'true'
+        with:
+          python-version: '3.12'
+      - name: Install collector
+        if: steps.slot.outputs.run == 'true'
+        run: pip install -r requirements.txt
+      - name: Collect prices
+        if: steps.slot.outputs.run == 'true'
+        run: python fetch_data.py
+      - uses: actions/configure-pages@v5
+        if: steps.slot.outputs.run == 'true'
+      - uses: actions/upload-pages-artifact@v4
+        if: steps.slot.outputs.run == 'true'
+        with:
+          path: .
+      - id: deployment
+        if: steps.slot.outputs.run == 'true'
+        uses: actions/deploy-pages@v4
