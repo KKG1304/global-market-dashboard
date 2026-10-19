@@ -50,10 +50,10 @@ for x in d.get("macro",[]):
   if x.get("actual") is not None:macro.append(x)
 macro.sort(key=lambda x:(0 if x["region"]=="US" else 1,x["event"]))
 queries=[
- ("US","Federal Reserve inflation jobs treasury stock market when:3d"),
- ("US","Nasdaq technology stocks earnings AI chips when:3d"),
- ("India","RBI inflation rupee Nifty markets when:3d"),
- ("India","India economy companies earnings stock market when:3d")]
+ ("US","Markets","Federal Reserve inflation jobs treasury stock market when:3d"),
+ ("US","Technology","Nasdaq technology stocks earnings AI chips when:3d"),
+ ("India","Markets","RBI inflation rupee Nifty markets when:3d"),
+ ("India","Pharma","India pharmaceutical company USFDA approval when:30d")]
 # Official central-bank announcements take precedence over aggregated coverage.
 news=[];seen=set()
 official_feeds=[
@@ -81,7 +81,9 @@ for region,sector,q in queries:
    news.append({"region":region,"sector":sector,"title":title,"url":link,"published":item.get("published",""),"source":item.get("source",{}).get("title","Google News RSS"),"impactRemark":("Potential impact on Indian insurers and distribution; confirm regulatory details and affected companies." if sector=="Insurance / IRDAI" else "Potential impact on Indian pharma revenue, compliance or product pipeline; verify company-specific exposure." if sector=="Pharma" else "Potential market or sector impact; assess the original article before investing."),"type":"Aggregated headline; significance not independently verified"})
    break
  except Exception as e:print("NEWS FAILED",region,str(e)[:120])
-if not news:news=d.get("news",[])\n# Exactly three slots per region, prioritizing insurance and pharma among Indian items.\n# US: official Fed first, then market headlines. India: one market item, one IRDAI item, one pharma item where available.
+if not news:news=d.get("news",[])
+# Exactly three slots per region, prioritizing insurance and pharma among Indian items.
+# US: official Fed first, then market headlines. India: one market item, one IRDAI item, one pharma item where available.
 selected=[]
 for region in ("US","India"):
  pool=[x for x in news if x.get("region")==region]
