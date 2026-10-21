@@ -1,4 +1,4 @@
-"""Daily closing snapshots. Yahoo/yfinance is unofficial and can be delayed/unavailable."""
+"""Timestamped delayed intraday quotes where available; daily closes for SMA."""
 import datetime,json
 from pathlib import Path
 import pandas as pd
@@ -18,6 +18,18 @@ def daily(ticker):
  c=h["Close"].dropna()
  c.index=pd.to_datetime(c.index).tz_localize(None).normalize()
  return c[~c.index.duplicated(keep="last")].sort_index()
+def intraday(ticker):
+ try:
+  h=yf.Ticker(ticker).history(period="5d",interval="5m",auto_adjust=False)
+  if h is None or h.empty:return None,None
+  close=h["Close"].dropna()
+  if close.empty:return None,None
+  stamp=close.index[-1]
+  if stamp.tzinfo is None:stamp=stamp.tz_localize("UTC")
+  return num(close.iloc[-1]),stamp.tz_convert("UTC").isoformat()
+ except Exception as e:
+  print("INTRADAY ERROR",ticker,str(e)[:160])
+  return None,None
 def record(name,region,symbol,unit,series,source,note):
  row={"name":name,"region":region,"symbol":symbol,"unit":unit,"price":None,"change":None,"sma50":None,"sma100":None,"sma200":None,"quoteTime":None,"status":"unavailable","source":source,"note":note}
  if len(series):
@@ -25,7 +37,7 @@ def record(name,region,symbol,unit,series,source,note):
   if len(series)>=2 and series.iloc[-2]!=0:row["change"]=num(100*(series.iloc[-1]/series.iloc[-2]-1))
   for n in (50,100,200):
    if len(series)>=n:row["sma"+str(n)]=num(series.iloc[-n:].mean())
-  row["status"]="Historical/delayed daily close (not intraday)"
+  row["status"]="Previous/daily close; not intraday"
  return row
 cache={}
 def get(t):
@@ -36,7 +48,25 @@ def get(t):
  return cache[t]
 markets=[]
 for name,region,symbol,unit in specs:
- markets.append(record(name,region,symbol,unit,get(symbol),"Yahoo Finance via yfinance (unofficial)","SMA based on 50/100/200 daily closes, not live ticks"))
+ row=record(name,region,symbol,unit,get(symbol),"Yahoo Finance via yfinance (unofficial)","SMA from daily closes; intraday prices can be delayed")
+ price,stamp=intraday(symbol)
+ if price is not None and stamp:
+  now=datetime.datetime.now(datetime.timezone.utc)
+  observed=datetime.datetime.fromisoformat(stamp)
+  age=(now-observed).total_seconds()/60
+  if -5<=age<=120:
+   row["previousClose"]=row["price"]
+   # On the same date, daily bar can represent today's partial close; use prior daily bar instead.
+   series=get(symbol)
+   if len(series)>=2 and series.index[-1].date()==observed.date():
+    row["previousClose"]=num(series.iloc[-2])
+   row["price"]=price
+   row["quoteTime"]=stamp
+   row["change"]=num(100*(price/row["previousClose"]-1)) if row["previousClose"] else None
+   row["status"]="Intraday delayed; quote age "+str(round(age))+" minutes"
+  else:
+   row["status"]="Previous/daily close; intraday quote too old ("+str(round(age))+" min)"
+ markets.append(row)
 fx=get("INR=X")
 for name,ticker,unit,factor in [("Gold (INR, indicative)","GC=F","INR/10g",10/31.1034768),("Silver (INR, indicative)","SI=F","INR/kg",1000/31.1034768)]:
  usd=get(ticker)
@@ -52,6 +82,6 @@ for row in markets:
    row.update({k:prev.get(k) for k in ("price","change","quoteTime","sma50","sma100","sma200")})
    row["status"]="STALE: preserved previous dated snapshot; upstream unavailable"
 count=sum(x["price"] is not None for x in markets)
-data={"asOf":datetime.datetime.now(datetime.timezone.utc).isoformat(),"dataStatus":f"Daily historical/delayed data: {count}/{len(markets)} values available. No 15-minute freshness guarantee.","markets":markets,"macro":[],"news":[],"sourceNotes":"NASDAQ-100 is tech-heavy, not exclusively technology. Gold INR/10g and Silver INR/kg are indicative COMEX × FX conversions, NOT MCX prices. SMA50/100/200 calculated from daily closing prices only where sufficient observations exist. Missing data remains blank; last verified snapshots are dated.","lastSuccessfulMarketData":max((x["quoteTime"] for x in markets if x.get("quoteTime")),default=None)}
+data={"asOf":datetime.datetime.now(datetime.timezone.utc).isoformat(),"dataStatus":f"Delayed intraday where available; {count}/{len(markets)} prices available. Check each quote time; 20-minute freshness not guaranteed.","markets":markets,"macro":[],"news":[],"sourceNotes":"NASDAQ-100 is tech-heavy, not exclusively technology. Gold INR/10g and Silver INR/kg are indicative COMEX × FX conversions, NOT MCX prices. SMA50/100/200 calculated from daily closing prices only where sufficient observations exist. Missing data remains blank; last verified snapshots are dated.","lastSuccessfulMarketData":max((x["quoteTime"] for x in markets if x.get("quoteTime")),default=None)}
 (ROOT/"data.json").write_text(json.dumps(data,indent=2)+"\n")
 print(data["dataStatus"])
